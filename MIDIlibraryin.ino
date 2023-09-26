@@ -1,3 +1,5 @@
+// https://fortyseveneffects.github.io/arduino_midi_library/index.html
+
 #include <MIDI.h>  // Add Midi Library
 
 #define LED 8    // Arduino Board LED is on Pin 8
@@ -6,10 +8,11 @@
 MIDI_CREATE_DEFAULT_INSTANCE();
 
 void setup() {
-  pinMode (LED, OUTPUT); // Set Arduino board pin 13 to output
+  pinMode (LED, OUTPUT); // Set Arduino board pin 8 to output
   MIDI.begin(MIDI_CHANNEL_OMNI); // Initialize the Midi Library.
   // OMNI sets it to listen to all channels.. MIDI.begin(2) would set it 
   // to respond to notes on channel 2 only.
+  MIDI.turnThruOff(); // Turns MIDI through off
   MIDI.setHandleNoteOn(handleNoteOn); // This is important!! This command
   // tells the Midi Library which function you want to call when a NOTE ON command
   // is received. In this case it's "handleNoteOn".
@@ -26,6 +29,7 @@ void loop() { // Main loop
 // It will be passed bytes for Channel, Pitch, and Velocity
 void handleNoteOn(byte channel, byte pitch, byte velocity) { 
   digitalWrite(LED,HIGH);  //Turn LED on
+  MIDI.sendNoteOn(pitch, velocity, channel);
 }
 
 // handleNoteOFF is the function that will be called by the Midi Library
@@ -34,4 +38,5 @@ void handleNoteOn(byte channel, byte pitch, byte velocity) {
 // It will be passed bytes for Channel, Pitch, and Velocity
 void handleNoteOff(byte channel, byte pitch, byte velocity) { 
   digitalWrite(LED,LOW);  //Turn LED off
+  MIDI.sendNoteOff(pitch, velocity, channel);
 }
