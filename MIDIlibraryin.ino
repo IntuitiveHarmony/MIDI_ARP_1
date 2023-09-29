@@ -9,7 +9,7 @@
 MIDI_CREATE_DEFAULT_INSTANCE();
 
 midiEventPacket_t notesHeld[10];  // Array to store MIDI data for held notes
-int notesHeldCount = 0;           // Enables program to check if a note is held
+uint8_t notesHeldCount = 0;           // Enables program to check if a note is held
 
 void setup() {                    // setup arduino
   pinMode(LED, OUTPUT);           // Set Arduino board pin 8 to output
@@ -38,13 +38,15 @@ void loop() {   // Main loop
   }
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // MIDI IN: Handle Control Change messages
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void handleControlChange(byte channel, byte control, byte value) {
 
   MIDI.sendControlChange(control, value, channel);
 
   // Send MIDI event to USB
-  midiEventPacket_t event = { 0x0B, 0xB0 | channel, control, value };
+  midiEventPacket_t event = { 0x0B, 0xB0 | channel - 1, control, value };
   MidiUSB.sendMIDI(event);
   MidiUSB.flush();
 
@@ -55,97 +57,96 @@ void handleControlChange(byte channel, byte control, byte value) {
   Serial.print(", Value: ");
   Serial.println(value);
 }
-
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // handleNoteON is the function that will be called by the Midi Library
 // when a MIDI NOTE ON message is received.
 // It will be passed bytes for Channel, Pitch, and Velocity
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void handleNoteOn(byte channel, byte note, byte velocity) {
   notesHeldCount++;  // Track if note is held
 
 
-  // MIDI.sendNoteOn(note, velocity, channel);  // Send MIDI to DIN
+  // Create new MIDI Event for USB the - 1 is because the MIDIUSB library misses the channel for some reason
+  midiEventPacket_t noteOn = { 0x09, 0x90 | channel - 1, note, velocity };
 
-
-  // Create new MIDI Event for USB
-  midiEventPacket_t noteOn = { 0x09, 0x90 | channel, note, velocity };
-  // MidiUSB.sendMIDI(noteOn);  // Send MIDI event to USB
-  // MidiUSB.flush();           // Send midi event immediately
 
   triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
 
-  Serial.print("Note On - Channel: ");
-  Serial.print(channel);
-  Serial.print(", Note Number: ");
-  Serial.print(note);
-  Serial.print(", Velocity: ");
-  Serial.println(velocity);
+
+  // Helpful for debugging
+  //~~~~~~~~~~~~~~~~~~~~~~~
+  // Serial.print("Note On - Channel: ");
+  // Serial.print(channel);
+  // Serial.print(", Note Number: ");
+  // Serial.print(note);
+  // Serial.print(", Velocity: ");
+  // Serial.println(velocity);
 }
 
-// function for different types of 3 byte midi events will send events to both DIN and USB
-void triggerUSB_DIN(midiEventPacket_t midiEvent) {
-  uint8_t type = (midiEvent.byte1 & 0xF0) >> 4;  // Masking to get the upper 4 bits and shifting to the right
-  uint8_t channel = (midiEvent.byte1 & 0x0F);    // Masking to get the lower 4 bits
-  uint8_t note = midiEvent.byte2;
-  uint8_t velocity = midiEvent.byte3;
 
-
-
-  // note off condition
-  if (type == 8) {
-    Serial.println("DIN off");
-    MIDI.sendNoteOff(note, velocity, channel);
-  } else if (type == 9) {
-    Serial.println("DIN on");
-    MIDI.sendNoteOn(note, velocity, channel);
-  }
-
-  uint8_t header = midiEvent.header;
-  Serial.print("Header: ");
-  Serial.println(header);
-  // Status Byte
-  // 2 parts the type and the channel
-  // Note on, Note off, Aftertouch, Control Change, Channel Pressure, Pitch Bend, or System
-  uint8_t midi1 = midiEvent.byte1;
-  Serial.print("byte1 HEX: ");
-  Serial.println(midi1, HEX);
-  Serial.print("Type: ");
-  Serial.println(type);
-  Serial.print("Channel: ");
-  Serial.println(channel);
-  // Data Byte 1
-  // Note, Control number, Program Number, or Pressure
-  uint8_t midi2 = midiEvent.byte2;
-  Serial.print("byte2: ");
-  Serial.println(midi2);
-  // Data Byte 2
-  // Velocity, pressure, or control value
-  uint8_t midi3 = midiEvent.byte3;
-  Serial.print("byte3: ");
-  Serial.println(midi3);
-}
-
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // handleNoteOFF is the function that will be called by the Midi Library
 // when a MIDI NOTE OFF message is received.
 // * A NOTE ON message with Velocity = 0 will be treated as a NOTE OFF message *
 // It will be passed bytes for Channel, Pitch, and Velocity
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void handleNoteOff(byte channel, byte note, byte velocity) {
   notesHeldCount--;  // Track if note is held
 
-  // MIDI.sendNoteOff(note, velocity, channel);
-
   // Create new MIDI Event for USB
-  midiEventPacket_t noteOff = { 0x08, 0x80 | channel, note, velocity };
-
-
-  // MidiUSB.sendMIDI(noteOff);  // Send MIDI event to USB
-  // MidiUSB.flush();            // Send midi event immediately
+  midiEventPacket_t noteOff = { 0x08, 0x80 | channel - 1, note, velocity };
 
   triggerUSB_DIN(noteOff);  // Send to both USB and DIN connections
 
-  Serial.print("Note Off - Channel: ");
-  Serial.print(channel);
-  Serial.print(", Note Number: ");
-  Serial.print(note);
-  Serial.print(", Velocity: ");
-  Serial.println(velocity);
+
+  // Helpful for debugging
+  //~~~~~~~~~~~~~~~~~~~~~~~
+  // Serial.print("Note Off - Channel: ");
+  // Serial.print(channel);
+  // Serial.print(", Note Number: ");
+  // Serial.print(note);
+  // Serial.print(", Velocity: ");
+  // Serial.println(velocity);
+}
+
+// function for different types of 3 byte midi events will send events to both DIN and USB
+void triggerUSB_DIN(midiEventPacket_t midiEvent) {
+  // Status Byte
+  // 2 parts: type and channel
+  // Note on, Note off, Aftertouch, Control Change, Channel Pressure, Pitch Bend, or System
+  uint8_t type = (midiEvent.byte1 & 0xF0) >> 4;    // Masking to get the upper 4 bits and shifting to the right
+  uint8_t channel = (midiEvent.byte1 & 0x0F) + 1;  // Masking to get the lower 4 bits adding one to correct for USB MIDI packet
+
+  // Data Byte 2
+  // Note, Control number, Program Number, or Pressure
+  uint8_t note = midiEvent.byte2;
+
+  // Data Byte 3
+  // Velocity, pressure, or control value
+  uint8_t velocity = midiEvent.byte3;
+
+  switch (type) {
+    case 8:  // note off condition
+      MIDI.sendNoteOff(note, velocity, channel);
+      MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
+      MidiUSB.flush();              // Send midi event immediately
+      break;
+    case 9:  // note on condition
+      MIDI.sendNoteOn(note, velocity, channel);
+      MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
+      MidiUSB.flush();              // Send midi event immediately
+      break;
+  }
+
+
+  // Helpful for debugging
+  //~~~~~~~~~~~~~~~~~~~~~~~
+  // Serial.print("Type: ");
+  // Serial.print(type);
+  // Serial.print(" Channel: ");
+  // Serial.print(channel);
+  // Serial.print(" Note: ");
+  // Serial.print(note);
+  // Serial.print(" Velocity: ");
+  // Serial.println(velocity);
 }
