@@ -8,25 +8,28 @@
 //Create an instance of the library with default name, serial port and settings
 MIDI_CREATE_DEFAULT_INSTANCE();
 
-midiEventPacket_t notesHeld[10];  // Array to store MIDI data for held notes
-uint8_t notesHeldCount = 0;           // Enables program to check if a note is held
+const int MAX_NOTES = 10;
+midiEventPacket_t notesHeld[MAX_NOTES];  // Array to store MIDI data for held notes to arpeggiate over
+uint8_t notesHeldCount = 0;              // Enables program to check if a note is held
 
 void setup() {                    // setup arduino
   pinMode(LED, OUTPUT);           // Set Arduino board pin 8 to output
   MIDI.begin(MIDI_CHANNEL_OMNI);  // Initialize the Midi Library.
   // OMNI sets it to listen to all channels.. MIDI.begin(2) would set it
   // to respond to notes on channel 2 only.
-  MIDI.turnThruOff();                                // Turns MIDI through off DIN to DIN
-  MIDI.setHandleControlChange(handleControlChange);  // Set the callback function for control changes
-  MIDI.setHandleNoteOn(handleNoteOn);                // This is important!! This command
+  MIDI.turnThruOff();                  // Turns MIDI through off DIN to DIN
+  MIDI.setHandleNoteOn(handleNoteOn);  // This is important!! This command
   // tells the Midi Library which function you want to call when a NOTE ON command
   // is received. In this case it's "handleNoteOn".
   MIDI.setHandleNoteOff(handleNoteOff);  // This command tells the Midi Library
   // to call "handleNoteOff" when a NOTE OFF command is received.
+  MIDI.setHandleControlChange(handleControlChange);  // Set the callback function for control changes
 }
 
 void loop() {   // Main loop
   MIDI.read();  // Continuously check if Midi data has been received.
+
+  // not sure if these two need to be here like this still figuring out the usb midi in
   MidiUSB.read();
   MidiUSB.flush();  //Send any MIDI data contained within buffer
 
@@ -36,6 +39,9 @@ void loop() {   // Main loop
   } else {
     digitalWrite(LED, LOW);  // Turn the LED off if no or only one note is held
   }
+  printNotesHeld();
+  Serial.print("NOTES HELD: ");
+  Serial.println(notesHeldCount);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -63,15 +69,16 @@ void handleControlChange(byte channel, byte control, byte value) {
 // It will be passed bytes for Channel, Pitch, and Velocity
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void handleNoteOn(byte channel, byte note, byte velocity) {
-  notesHeldCount++;  // Track if note is held
+  // Make sure array has room
+  if (notesHeldCount < MAX_NOTES) {
+    // Create new MIDI Event for USB the - 1 is because the MIDIUSB library misses the channel for some reason
+    midiEventPacket_t noteOn = { 0x09, 0x90 | channel - 1, note, velocity };
 
+    notesHeld[notesHeldCount] = noteOn;  // Add MIDI event to array
+    notesHeldCount++;                    // Track if note is held
 
-  // Create new MIDI Event for USB the - 1 is because the MIDIUSB library misses the channel for some reason
-  midiEventPacket_t noteOn = { 0x09, 0x90 | channel - 1, note, velocity };
-
-
-  triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
-
+    triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
+  }
 
   // Helpful for debugging
   //~~~~~~~~~~~~~~~~~~~~~~~
@@ -91,12 +98,23 @@ void handleNoteOn(byte channel, byte note, byte velocity) {
 // It will be passed bytes for Channel, Pitch, and Velocity
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 void handleNoteOff(byte channel, byte note, byte velocity) {
-  notesHeldCount--;  // Track if note is held
-
   // Create new MIDI Event for USB
   midiEventPacket_t noteOff = { 0x08, 0x80 | channel - 1, note, velocity };
+  // Search for the note in the array and remove it
+  for (int i = 0; i < notesHeldCount; ++i) {
+    if (notesHeld[i].byte2 == note) {
+      // Found the note, remove it from the array
+      for (int j = i; j < notesHeldCount - 1; ++j) {
+        notesHeld[j] = notesHeld[j + 1];
+      }
+      notesHeldCount--; //Track it
 
-  triggerUSB_DIN(noteOff);  // Send to both USB and DIN connections
+      // Trigger USB and DIN events
+      triggerUSB_DIN(noteOff);
+
+      break;  // Exit the loop after removing the note
+    }
+  }
 
 
   // Helpful for debugging
@@ -149,4 +167,20 @@ void triggerUSB_DIN(midiEventPacket_t midiEvent) {
   // Serial.print(note);
   // Serial.print(" Velocity: ");
   // Serial.println(velocity);
+}
+
+void printNotesHeld() {
+  Serial.println("Notes Held:");
+  for (int i = 0; i < notesHeldCount; ++i) {
+    midiEventPacket_t note = notesHeld[i];
+    Serial.print("Note ");
+    Serial.print(i + 1);
+    Serial.print(": Channel ");
+    Serial.print((note.byte1 & 0x0F) + 1);  // Extract channel
+    Serial.print(", Pitch ");
+    Serial.print(note.byte2);
+    Serial.print(", Velocity ");
+    Serial.println(note.byte3);
+  }
+  Serial.println("End of Notes Held");
 }
