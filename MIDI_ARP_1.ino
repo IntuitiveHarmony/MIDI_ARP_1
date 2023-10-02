@@ -8,13 +8,22 @@
 //Create an instance of the library with default name, serial port and settings
 MIDI_CREATE_DEFAULT_INSTANCE();
 
+// Arpeggio setings
+const int potentiometerPin = A0;  // Pin where the potentiometer is connected
+int arpeggioIntervalMin = 50;     // Minimum arpeggio interval
+int arpeggioIntervalMax = 1000;   // Maximum arpeggio interval
+unsigned long lastArpeggioTime = 0;
+unsigned long arpeggioInterval = 250;
+int arpeggioCounter = 0;
+
 const int MAX_NOTES = 10;
 midiEventPacket_t notesHeld[MAX_NOTES];  // Array to store MIDI data for held notes to arpeggiate over
 uint8_t notesHeldCount = 0;              // Enables program to check if a note is held
 
-void setup() {                    // setup arduino
-  pinMode(LED, OUTPUT);           // Set Arduino board pin 8 to output
-  MIDI.begin(MIDI_CHANNEL_OMNI);  // Initialize the Midi Library.
+void setup() {                       // setup arduino
+  pinMode(LED, OUTPUT);              // Set Arduino board pin 8 to output
+  pinMode(potentiometerPin, INPUT);  // Get input from pot for the tempo
+  MIDI.begin(MIDI_CHANNEL_OMNI);     // Initialize the Midi Library.
   // OMNI sets it to listen to all channels.. MIDI.begin(2) would set it
   // to respond to notes on channel 2 only.
   MIDI.turnThruOff();                  // Turns MIDI through off DIN to DIN
@@ -26,7 +35,10 @@ void setup() {                    // setup arduino
   MIDI.setHandleControlChange(handleControlChange);  // Set the callback function for control changes
 }
 
-void loop() {   // Main loop
+void loop() {  // Main loop
+               // Read the potentiometer value and map it to the arpeggio interval range
+  int potValue = analogRead(potentiometerPin);
+  arpeggioInterval = map(potValue, 0, 1023, arpeggioIntervalMin, arpeggioIntervalMax);
   MIDI.read();  // Continuously check if Midi data has been received.
 
   // not sure if these two need to be here like this still figuring out the usb midi in
@@ -35,13 +47,32 @@ void loop() {   // Main loop
 
   // Check if any notes are held, and set the LED state accordingly
   if (notesHeldCount >= 1) {
-    digitalWrite(LED, HIGH);  // Turn the LED on if multiple notes are held
+    digitalWrite(LED, HIGH);  // Turn the LED on if any notes are held
+
+    // Check if it's time for the next arpeggio step
+    if (millis() - lastArpeggioTime >= arpeggioInterval) {
+      // Play the note in the arpeggio sequence
+      triggerUSB_DIN(notesHeld[arpeggioCounter]);
+
+      arpeggioCounter = (arpeggioCounter + 1) % notesHeldCount;  // Move to the next note in the arpeggio
+      lastArpeggioTime = millis();                               // Update the last arpeggio time
+    }
   } else {
-    digitalWrite(LED, LOW);  // Turn the LED off if no or only one note is held
+    digitalWrite(LED, LOW);  // Turn the LED off if no note is held
+    lastArpeggioTime = 0;    // Reset the arpeggio timer
+    arpeggioCounter = 0;     // Reset the arpeggio counter
   }
+
+  // Send the note-off events for released notes
+  for (int i = 0; i < notesHeldCount; i++) {
+    if (notesHeld[i].byte3 == 0) {
+      triggerUSB_DIN(notesHeld[i]);
+    }
+  }
+
   printNotesHeld();
-  Serial.print("NOTES HELD: ");
-  Serial.println(notesHeldCount);
+  // Serial.print("NOTES HELD: ");
+  // Serial.println(notesHeldCount);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -77,6 +108,7 @@ void handleNoteOn(byte channel, byte note, byte velocity) {
     notesHeld[notesHeldCount] = noteOn;  // Add MIDI event to array
     notesHeldCount++;                    // Track if note is held
 
+    // play forst note immedietly
     triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
   }
 
@@ -107,7 +139,7 @@ void handleNoteOff(byte channel, byte note, byte velocity) {
       for (int j = i; j < notesHeldCount - 1; ++j) {
         notesHeld[j] = notesHeld[j + 1];
       }
-      notesHeldCount--; //Track it
+      notesHeldCount--;  //Track it
 
       // Trigger USB and DIN events
       triggerUSB_DIN(noteOff);
@@ -170,7 +202,7 @@ void triggerUSB_DIN(midiEventPacket_t midiEvent) {
 }
 
 void printNotesHeld() {
-  Serial.println("Notes Held:");
+  // Serial.println("Notes Held:");
   for (int i = 0; i < notesHeldCount; ++i) {
     midiEventPacket_t note = notesHeld[i];
     Serial.print("Note ");
@@ -182,5 +214,5 @@ void printNotesHeld() {
     Serial.print(", Velocity ");
     Serial.println(note.byte3);
   }
-  Serial.println("End of Notes Held");
+  // Serial.println("End of Notes Held");
 }
