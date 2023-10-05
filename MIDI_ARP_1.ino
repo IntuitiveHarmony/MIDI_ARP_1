@@ -8,6 +8,11 @@
 //Create an instance of the library with default name, serial port and settings
 MIDI_CREATE_DEFAULT_INSTANCE();
 
+// LED settings
+const int LEDDuration = 1;  // Duration in milliseconds for the LED to stay on
+unsigned long lastLEDTime = 0;
+bool isLEDOn = false;
+
 // Arpeggio setings
 const int tempoPin = A0;         // Pin where the Tempo potentiometer is connected
 int arpeggioIntervalMin = 5;     // Minimum arpeggio interval (max fast)
@@ -19,6 +24,9 @@ int arpeggioCounter = 0;
 // Probability settings
 const int probabilityPin = A1;  // Pin where the probability potentiometer is connected
 int noteProbability = 100;      // start with 100%
+
+// Octave settings
+const int octavePin = A2;  // Pin where the octave potentiometer is connected
 
 // Held notes settings
 const int MAX_NOTES = 10;
@@ -52,6 +60,12 @@ void loop() {  // Main loop
   // this doesn't get to 0% or 100% when max an min are set to 0 and 100 :|
   noteProbability = map(probabilityValue, 0, 1023, -9, 106);
 
+  // Read the octave potentiometer value and map it to the desired octave range
+  int octavePotValue = analogRead(octavePin);
+  int octaveAmount = map(octavePotValue, 0, 1023, 0, 4);  // Set to 4 but I only want 3 octaves :|
+  Serial.print("octave. ");
+  Serial.println(octaveAmount);
+
   MIDI.read();  // Continuously check if Midi data has been received.
 
   // not sure if these two need to be here like this still figuring out the usb midi in
@@ -60,35 +74,62 @@ void loop() {  // Main loop
 
   // Check if any notes are held, and set the LED state accordingly
   if (notesHeldCount >= 1) {
-    digitalWrite(LED, HIGH);  // Turn the LED on if any notes are held
+    // digitalWrite(LED, HIGH);  // Turn the LED on if any notes are held
 
     // Check if it's time for the next arpeggio step
     if (millis() - lastArpeggioTime >= arpeggioInterval) {
-      // Randomly decide whether to play a note based on probability
-      if (random(0, 100) < noteProbability) {
-        // Play the note in the arpeggio sequence
-        triggerUSB_DIN(notesHeld[arpeggioCounter]);
+      // Iterate over octaves based on the adjusted octave amount
+      for (int octave = 0; octave <= octaveAmount; octave++) {
+        // Randomly decide whether to play a note based on probability
+        if (random(0, 100) < noteProbability) {
+          // Play the note in the arpeggio sequence
+          triggerUSB_DIN(notesHeld[arpeggioCounter], octave);
+        }
       }
 
       arpeggioCounter = (arpeggioCounter + 1) % notesHeldCount;  // Move to the next note in the arpeggio
       lastArpeggioTime = millis();                               // Update the last arpeggio time
     }
   } else {
-    digitalWrite(LED, LOW);  // Turn the LED off if no note is held
+    // digitalWrite(LED, LOW);  // Turn the LED off if no note is held
     lastArpeggioTime = 0;    // Reset the arpeggio timer
     arpeggioCounter = 0;     // Reset the arpeggio counter
   }
 
-  // Send the note-off events for released notes
+  // Send the note-off events only for released notes
   for (int i = 0; i < notesHeldCount; i++) {
     if (notesHeld[i].byte3 == 0) {
-      triggerUSB_DIN(notesHeld[i]);
+      // Check if the note is still held to prevent looping
+      if (!isNoteHeld(notesHeld[i].byte2)) {
+        triggerUSB_DIN(notesHeld[i], 0);
+        // Remove the note from the array as it's no longer held
+        removeNoteFromHeld(i);
+        i--;  // Adjust the index since the array has been modified
+      }
     }
   }
 
   printNotesHeld();
   // Serial.print("NOTES HELD: ");
   // Serial.println(notesHeldCount);
+}
+
+// Function to check if a note is still held
+bool isNoteHeld(byte note) {
+  for (int i = 0; i < notesHeldCount; i++) {
+    if (notesHeld[i].byte2 == note) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Function to remove a note from the held notes array
+void removeNoteFromHeld(int index) {
+  for (int i = index; i < notesHeldCount - 1; i++) {
+    notesHeld[i] = notesHeld[i + 1];
+  }
+  notesHeldCount--;
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -125,7 +166,7 @@ void handleNoteOn(byte channel, byte note, byte velocity) {
     notesHeldCount++;                    // Track if note is held
 
     // play forst note immedietly
-    triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
+    triggerUSB_DIN(noteOn, 0);  // Send to both USB and DIN connections
   }
 
   // Helpful for debugging
@@ -158,7 +199,7 @@ void handleNoteOff(byte channel, byte note, byte velocity) {
       notesHeldCount--;  //Track it
 
       // Trigger USB and DIN events
-      triggerUSB_DIN(noteOff);
+      triggerUSB_DIN(noteOff, 0);
 
       break;  // Exit the loop after removing the note
     }
@@ -176,7 +217,7 @@ void handleNoteOff(byte channel, byte note, byte velocity) {
 }
 
 // function for different types of 3 byte midi events will send events to both DIN and USB
-void triggerUSB_DIN(midiEventPacket_t midiEvent) {
+void triggerUSB_DIN(midiEventPacket_t midiEvent, int octave) {
   // Status Byte
   // 2 parts: type and channel
   // Note on, Note off, Aftertouch, Control Change, Channel Pressure, Pitch Bend, or System
@@ -191,19 +232,28 @@ void triggerUSB_DIN(midiEventPacket_t midiEvent) {
   // Velocity, pressure, or control value
   uint8_t velocity = midiEvent.byte3;
 
+  // Toggle LED momentarily for each MIDI event
+  toggleLED();
+
   switch (type) {
     case 8:  // note off condition
-      MIDI.sendNoteOff(note, velocity, channel);
+      // Send MIDI event to both USB and DIN connections
+      MIDI.sendNoteOff(note + (octave * 12), 0, channel);
       MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
-      MidiUSB.flush();              // Send midi event immediately
+      MidiUSB.flush();              // Send MIDI event immediately
       break;
     case 9:  // note on condition
-      MIDI.sendNoteOn(note, velocity, channel);
+      if (velocity == 0) {
+        // Velocity is 0, treat it as a note off
+        MIDI.sendNoteOff(note + (octave * 12), 0, channel);
+      } else {
+        // Velocity is non-zero, treat it as a note on
+        MIDI.sendNoteOn(note + (octave * 12), velocity, channel);
+      }
       MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
-      MidiUSB.flush();              // Send midi event immediately
+      MidiUSB.flush();              // Send MIDI event immediately
       break;
   }
-
 
   // Helpful for debugging
   //~~~~~~~~~~~~~~~~~~~~~~~
@@ -215,6 +265,17 @@ void triggerUSB_DIN(midiEventPacket_t midiEvent) {
   // Serial.print(note);
   // Serial.print(" Velocity: ");
   // Serial.println(velocity);
+}
+
+// Function to toggle the LED momentarily
+void toggleLED() {
+  unsigned long currentTime = millis();
+
+  if (currentTime - lastLEDTime >= LEDDuration) {
+    lastLEDTime = currentTime;
+    isLEDOn = !isLEDOn;
+    digitalWrite(LED, isLEDOn ? HIGH : LOW);
+  }
 }
 
 void printNotesHeld() {
