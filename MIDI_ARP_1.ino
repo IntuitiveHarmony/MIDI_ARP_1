@@ -9,21 +9,26 @@
 MIDI_CREATE_DEFAULT_INSTANCE();
 
 // Arpeggio setings
-const int potentiometerPin = A0;  // Pin where the potentiometer is connected
-int arpeggioIntervalMin = 50;     // Minimum arpeggio interval
-int arpeggioIntervalMax = 1000;   // Maximum arpeggio interval
+const int tempoPin = A0;         // Pin where the Tempo potentiometer is connected
+int arpeggioIntervalMin = 5;     // Minimum arpeggio interval (max fast)
+int arpeggioIntervalMax = 1000;  // Maximum arpeggio interval (max slow)
 unsigned long lastArpeggioTime = 0;
 unsigned long arpeggioInterval = 250;
 int arpeggioCounter = 0;
 
+// Probability settings
+const int probabilityPin = A1;  // Pin where the probability potentiometer is connected
+int noteProbability = 100;      // start with 100%
+
+// Held notes settings
 const int MAX_NOTES = 10;
 midiEventPacket_t notesHeld[MAX_NOTES];  // Array to store MIDI data for held notes to arpeggiate over
 uint8_t notesHeldCount = 0;              // Enables program to check if a note is held
 
-void setup() {                       // setup arduino
-  pinMode(LED, OUTPUT);              // Set Arduino board pin 8 to output
-  pinMode(potentiometerPin, INPUT);  // Get input from pot for the tempo
-  MIDI.begin(MIDI_CHANNEL_OMNI);     // Initialize the Midi Library.
+void setup() {                    // setup arduino
+  pinMode(LED, OUTPUT);           // Set Arduino board pin 8 to output
+  pinMode(tempoPin, INPUT);       // Get input from pot for the tempo
+  MIDI.begin(MIDI_CHANNEL_OMNI);  // Initialize the Midi Library.
   // OMNI sets it to listen to all channels.. MIDI.begin(2) would set it
   // to respond to notes on channel 2 only.
   MIDI.turnThruOff();                  // Turns MIDI through off DIN to DIN
@@ -36,9 +41,14 @@ void setup() {                       // setup arduino
 }
 
 void loop() {  // Main loop
-               // Read the potentiometer value and map it to the arpeggio interval range
-  int potValue = analogRead(potentiometerPin);
-  arpeggioInterval = map(potValue, 0, 1023, arpeggioIntervalMin, arpeggioIntervalMax);
+
+  int tempoPotValue = analogRead(tempoPin);  // Read the tempo pot value and map it to the arpeggio interval range
+  arpeggioInterval = map(tempoPotValue, 0, 1023, arpeggioIntervalMin, arpeggioIntervalMax);
+
+  // this never gets to 0% or 100% :/
+  int probabilityValue = analogRead(probabilityPin);  // Read the probabilty pot and map it
+  noteProbability = map(probabilityValue, 0, 1023, 0, 100);
+
   MIDI.read();  // Continuously check if Midi data has been received.
 
   // not sure if these two need to be here like this still figuring out the usb midi in
@@ -51,8 +61,11 @@ void loop() {  // Main loop
 
     // Check if it's time for the next arpeggio step
     if (millis() - lastArpeggioTime >= arpeggioInterval) {
-      // Play the note in the arpeggio sequence
-      triggerUSB_DIN(notesHeld[arpeggioCounter]);
+      // Randomly decide whether to play a note based on probability
+      if (random(0, 100) < noteProbability) {
+        // Play the note in the arpeggio sequence
+        triggerUSB_DIN(notesHeld[arpeggioCounter]);
+      }
 
       arpeggioCounter = (arpeggioCounter + 1) % notesHeldCount;  // Move to the next note in the arpeggio
       lastArpeggioTime = millis();                               // Update the last arpeggio time
