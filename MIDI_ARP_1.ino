@@ -41,13 +41,16 @@ void setup() {                    // setup arduino
 }
 
 void loop() {  // Main loop
-
+  Serial.print("Prob. ");
+  Serial.println(noteProbability);
+  Serial.print("tempo. ");
+  Serial.println(arpeggioInterval);
   int tempoPotValue = analogRead(tempoPin);  // Read the tempo pot value and map it to the arpeggio interval range
   arpeggioInterval = map(tempoPotValue, 0, 1023, arpeggioIntervalMin, arpeggioIntervalMax);
 
-  // this never gets to 0% or 100% :/
   int probabilityValue = analogRead(probabilityPin);  // Read the probabilty pot and map it
-  noteProbability = map(probabilityValue, 0, 1023, 0, 100);
+  // this doesn't get to 0% or 100% when max an min are set to 0 and 100 :|
+  noteProbability = map(probabilityValue, 0, 1023, -9, 106);
 
   MIDI.read();  // Continuously check if Midi data has been received.
 
