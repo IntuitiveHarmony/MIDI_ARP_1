@@ -101,7 +101,7 @@ void loop() {  // Main loop
     if (notesHeld[i].byte3 == 0) {
       // Check if the note is still held to prevent looping
       if (!isNoteHeld(notesHeld[i].byte2)) {
-        triggerUSB_DIN(notesHeld[i], 0);
+        triggerUSB_DIN(notesHeld[i]);
         // Remove the note from the array as it's no longer held
         removeNoteFromHeld(i);
         i--;  // Adjust the index since the array has been modified
@@ -166,7 +166,7 @@ void handleNoteOn(byte channel, byte note, byte velocity) {
     notesHeldCount++;                    // Track if note is held
 
     // play forst note immedietly
-    triggerUSB_DIN(noteOn, 0);  // Send to both USB and DIN connections
+    triggerUSB_DIN(noteOn);  // Send to both USB and DIN connections
   }
 
   // Helpful for debugging
@@ -199,7 +199,7 @@ void handleNoteOff(byte channel, byte note, byte velocity) {
       notesHeldCount--;  //Track it
 
       // Trigger USB and DIN events
-      triggerUSB_DIN(noteOff, 0);
+      triggerUSB_DIN(noteOff);
 
       break;  // Exit the loop after removing the note
     }
@@ -216,7 +216,43 @@ void handleNoteOff(byte channel, byte note, byte velocity) {
   // Serial.println(velocity);
 }
 
+// Overloaded function without octave argument
 // function for different types of 3 byte midi events will send events to both DIN and USB
+void triggerUSB_DIN(midiEventPacket_t midiEvent) {
+  // Status Byte
+  uint8_t type = (midiEvent.byte1 & 0xF0) >> 4;
+  uint8_t channel = (midiEvent.byte1 & 0x0F) + 1;
+
+  // Data Byte 2
+  uint8_t note = midiEvent.byte2;
+
+  // Data Byte 3
+  uint8_t velocity = midiEvent.byte3;
+
+  // Toggle LED momentarily for each MIDI event
+  toggleLED();
+
+  switch (type) {
+    case 8:  // note off condition
+      // Send MIDI event to both USB and DIN connections
+      MIDI.sendNoteOff(note, 0, channel);
+      MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
+      MidiUSB.flush();              // Send MIDI event immediately
+      break;
+    case 9:  // note on condition
+      if (velocity == 0) {
+        // Velocity is 0, treat it as a note off
+        MIDI.sendNoteOff(note, 0, channel);
+      } else {
+        // Velocity is non-zero, treat it as a note on
+        MIDI.sendNoteOn(note, velocity, channel);
+      }
+      MidiUSB.sendMIDI(midiEvent);  // Send MIDI event to USB
+      MidiUSB.flush();              // Send MIDI event immediately
+      break;
+  }
+}
+// Overloaded function that takes octave argument
 void triggerUSB_DIN(midiEventPacket_t midiEvent, int octave) {
   // Status Byte
   // 2 parts: type and channel
